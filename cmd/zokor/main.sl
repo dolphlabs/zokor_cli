@@ -1,4 +1,4 @@
-import "../../zokor" as zokor;
+import "zokor";
 import "proc";
 import "io";
 import "os";
@@ -6,6 +6,7 @@ import "time";
 
 fn usage() -> str {
     return "usage:\n" +
+           "  zokor version               this CLI, and the zokor release new projects pin\n" +
            "  zokor new <name> [--zokor-git URL] [--zokor-tag TAG]\n" +
            "  zokor newcomp <name> [--db memory|pg] [--zokor-git URL] [--zokor-tag TAG]\n" +
            "  zokor add feature <name> [--entity <singular>]\n" +
@@ -243,7 +244,9 @@ fn main() {
         fail_usage("");
     }
     let cmd = args[1];
-    if cmd == "migrate" {
+    if cmd == "version" || cmd == "--version" || cmd == "-v" {
+        println("zokor-cli " + cli_version() + " (new projects pin zokor " + default_tag() + ")");
+    } else if cmd == "migrate" {
         migrate_cmd(args);
     } else if cmd == "new" {
         new_cmd(args);

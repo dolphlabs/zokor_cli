@@ -19,6 +19,9 @@ expect() {
 }
 
 expect 2 'usage:' bin/zokor
+# The release new projects pin is this repository's own pin.
+pinned=$(sed -n 's/^pkg zokor git [^ ]* tag \([^ ]*\) dir zokor$/\1/p' slang.project)
+expect 0 "new projects pin zokor $pinned" bin/zokor version
 expect 2 'usage:' bin/zokor unknown
 expect 1 'migrations directory:' bin/zokor migrate testdata/does-not-exist
 expect 2 'MIGRATION_MAX_FILES' env MIGRATION_MAX_FILES=bad MIGRATION_TIMEOUT_SECONDS=bad bin/zokor migrate testdata/migrations

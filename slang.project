@@ -1,0 +1,6 @@
+name zokor_cli
+version 0.2.0
+exclude tests
+exclude testdata
+
+pkg zokor git https://github.com/dolphlabs/zokor tag v0.2.0 dir zokor
