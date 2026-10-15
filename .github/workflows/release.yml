@@ -1,0 +1,104 @@
+# Release: a version tag becomes a published GitHub release.
+#
+# To release: set cli_version() in cmd/zokor/version.sl and `version` in
+# slang.project to the new version, merge to main, then push an annotated
+# tag on main whose message is the release notes:
+#
+#     git tag -a v0.2.1 -m "zokor_cli v0.2.1" -m "<what changed>" origin/main
+#     git push origin v0.2.1
+#
+# The CLI ships as source: install.sh builds the tag with the user's own
+# slangc. So a release is the tagged commit passing CI on every platform,
+# then a GitHub release carrying the tag's message as its notes.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release, e.g. v0.2.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: check the tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      # The tag reaches the shell through env, never through ${{ }} inside
+      # the script: a crafted tag name must not become shell code.
+      - name: Resolve the tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${INPUT_TAG:-$REF_NAME}"
+          if ! printf '%s\n' "$tag" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::'$tag' is not a release tag (vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Annotated, on main, and the version the CLI says
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          [ "$(git cat-file -t "refs/tags/$TAG")" = tag ] ||
+            { echo "::error::$TAG is not an annotated tag"; exit 1; }
+          git fetch -q origin main
+          git merge-base --is-ancestor "$TAG^{commit}" origin/main ||
+            { echo "::error::$TAG is not on main"; exit 1; }
+          v="${TAG#v}"
+          grep -q "return \"$v\";" cmd/zokor/version.sl ||
+            { echo "::error::cli_version() in cmd/zokor/version.sl is not $v"; exit 1; }
+          grep -qx "version $v" slang.project ||
+            { echo "::error::slang.project's version is not $v"; exit 1; }
+
+  ci:
+    needs: tag
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: refs/tags/${{ needs.tag.outputs.tag }}
+
+  publish:
+    needs: [tag, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.tag.outputs.tag }}
+          fetch-depth: 0
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          git fetch -q --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          git tag -l --format='%(contents)' "$TAG" > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --title "zokor_cli $TAG" --notes-file notes.md --verify-tag
+          fi

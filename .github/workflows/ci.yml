@@ -1,0 +1,142 @@
+# CI: the CLI builds against the zokor release slang.project pins, and the
+# projects it writes build, pass their tests, serve and pass `zokor check`.
+#
+# Two compilers: the oldest slang release this CLI supports (what
+# install.sh accepts) and slang `dev`, so a compiler change that breaks
+# generated projects shows up before it ships.
+#
+# The scaffold test clones zokor at the pinned tag (tests/scaffold.sh), so
+# CI here is red until that tag exists.
+
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to test
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check (${{ matrix.name }}, slang ${{ matrix.slang }})
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [linux-x86_64, linux-arm64, macos-arm64]
+        slang: [v0.2.3, dev]
+        include:
+          - name: linux-x86_64
+            runner: ubuntu-24.04
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+          - name: macos-arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Check out slang (${{ matrix.slang }})
+        uses: actions/checkout@v4
+        with:
+          repository: dolphlabs/slang
+          ref: ${{ matrix.slang }}
+          path: .slang
+
+      - name: Install build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libsqlite3-dev \
+            zlib1g-dev git curl
+
+      - name: Install build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install pkg-config openssl@3
+
+      - name: Build slangc
+        run: |
+          make -C .slang slangc CC="cc -Wno-error=incompatible-pointer-types"
+          echo "SLANGC=$GITHUB_WORKSPACE/.slang/slangc" >> "$GITHUB_ENV"
+          .slang/slangc --version
+
+      # Generated projects' `make check` runs `zokor check` from PATH.
+      - name: Put slangc and zokor on PATH
+        run: |
+          echo "$GITHUB_WORKSPACE/.slang" >> "$GITHUB_PATH"
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      # `zokor migrate` and the --db pg project's store tests run against
+      # live databases where Docker is (Linux); they skip, and say so, on
+      # macOS.
+      - name: Start Postgres (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker run -d --name pg -e POSTGRES_PASSWORD=zokor -e POSTGRES_DB=cli_test \
+            -p 5432:5432 postgres:16
+          for i in $(seq 1 60); do
+            docker exec pg pg_isready -U postgres -d cli_test >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec pg pg_isready -U postgres -d cli_test
+          docker exec pg createdb -U postgres scaffold_test
+          echo "ZOKOR_TEST_DATABASE_URL=postgres://postgres:zokor@127.0.0.1:5432/cli_test" >> "$GITHUB_ENV"
+          echo "SCAFFOLD_TEST_DATABASE_URL=postgres://postgres:zokor@127.0.0.1:5432/scaffold_test" >> "$GITHUB_ENV"
+
+      - name: Templates, CLI and scaffold
+        timeout-minutes: 20
+        run: make check SLANGC="$SLANGC"
+
+  # What a user does: install.sh from this checkout, then `zokor new`.
+  install:
+    name: install.sh and zokor new (linux-x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/checkout@v4
+        with:
+          repository: dolphlabs/slang
+          ref: v0.2.3
+          path: .slang
+      - name: Install slang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libsqlite3-dev zlib1g-dev
+          make -C .slang slangc CC="cc -Wno-error=incompatible-pointer-types"
+          sudo make -C .slang install PREFIX=/usr/local
+          slangc --version
+      - name: install.sh
+        env:
+          ZOKOR_CLI_SOURCE: ${{ github.workspace }}
+        run: |
+          sh install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: zokor new, build, test, serve
+        run: |
+          cd "$RUNNER_TEMP"
+          zokor version
+          zokor new hello
+          cd hello
+          slangc get
+          make check
+          make build
+          PORT=18080 ./bin/hello & pid=$!
+          for i in $(seq 1 100); do curl -fs http://127.0.0.1:18080/healthz && break; sleep 0.05; done
+          curl -fs http://127.0.0.1:18080/healthz
+          kill -TERM $pid; wait $pid

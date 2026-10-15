@@ -1,7 +1,8 @@
 #!/bin/sh
 # `zokor new`, `zokor newcomp`, `zokor add` and `zokor check`, end to end:
-# generate projects against THIS checkout of zokor (pinned through a
-# throwaway git repo), build them, add a component and check refusals.
+# generate projects against a checkout of zokor (ZOKOR_SRC, or the tag
+# slang.project pins; pinned through a throwaway git repo), build them,
+# run one, add a component and check refusals.
 #
 # SCAFFOLD_TEST_DATABASE_URL, when set, is an empty database the --db pg
 # project's live store tests migrate and use; without it they skip.
@@ -27,10 +28,19 @@ expect_refusal() {
     esac
 }
 
-# The package as it is in this working tree, committed into a repository
-# of its own so `slangc get` can pin it.
+# The zokor package the projects are generated against: ZOKOR_SRC, a
+# checkout of dolphlabs/zokor (CI checks one out), or else the tag this CLI
+# pins in slang.project, cloned here. Committed into a repository of its
+# own so `slangc get` pins it the way a real project pins a tag.
+if [ -z "${ZOKOR_SRC:-}" ]; then
+    pinned=$(sed -n 's/^pkg zokor git [^ ]* tag \([^ ]*\) dir zokor$/\1/p' "$ROOT/slang.project")
+    [ -n "$pinned" ] || fail "no zokor pin in slang.project"
+    git clone -q --depth 1 --branch "$pinned" https://github.com/dolphlabs/zokor "$WORK/zokor-src" ||
+        fail "cannot clone zokor $pinned (set ZOKOR_SRC to a checkout)"
+    ZOKOR_SRC="$WORK/zokor-src"
+fi
 mkdir -p "$WORK/zokor"
-cp -R "$ROOT/zokor" "$ROOT/slang.project" "$ROOT/slang.lock" "$WORK/zokor/"
+cp -R "$ZOKOR_SRC/zokor" "$ZOKOR_SRC/slang.project" "$ZOKOR_SRC/slang.lock" "$WORK/zokor/"
 (cd "$WORK/zokor" && git init -q && git add -A &&
  git -c user.name=scaffold -c user.email=scaffold@localhost commit -qm scaffold &&
  git tag scaffold-test)
