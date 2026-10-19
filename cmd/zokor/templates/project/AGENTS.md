@@ -34,11 +34,14 @@ migrations/  NNN_description.sql, applied in order by `zokor migrate`
 
 - Imports go one way: `server -> service -> domain`; `store` implements
   `service`'s ports; `platform/app` wires stores to services. A feature
-  reaches another only through that feature's `service`. Only `store/` and
-  `platform/db` import pg; `domain` and `service` do no I/O.
+  reaches another only through that feature's `service`, except that a
+  `store` may call another feature's `store` to share a transaction. Only
+  `store/` and `platform/db` import pg; `domain` and `service` do no I/O.
 - The tenant is an explicit argument to every use case and store call.
 - Every `server.sl` puts its routes behind `auth.require_tenant`; a file
   of routes that are public on purpose says `// zokor:public`.
+- `zokor check` enforces the two rules above only when `zokor.rules`
+  lists them (`tenant`, `auth [guard]`, one per line).
 - SQL is a literal with `$1, $2 ...`; values never join the text.
 - Configuration is read once, in `platform/config`; nothing else reads the
   environment.

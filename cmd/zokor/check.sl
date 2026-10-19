@@ -12,15 +12,22 @@
 //              nothing but packages; src/platform/ holds shared packages
 //   imports    server -> service -> domain; store implements its own
 //              feature's service ports; platform/app wires; a feature
-//              reaches another only through that feature's service
+//              reaches another only through that feature's service, except
+//              that a store may call another feature's store, so one
+//              transaction can span both
 //   pure       domain/ and service/ import no I/O package and no zokor
 //   pg         only store/ and platform/db import pg
 //   sql        no SQL built by concatenating a value: pass it as $N
 //   config     only src/main.sl and platform/config read configuration
-//   tenant     every public use case in service/ takes a tenant_id
-//   auth       every server.sl puts its routes behind require_tenant
-//              (or says `// zokor:public`)
 //   tests      every package has a *_test.sl
+//
+// Two more are off unless the service opts in, one per line of a
+// `zokor.rules` file at its root (`#` starts a comment), because not every
+// service is multi-tenant or names its guard the same way:
+//
+//   tenant         every public use case in service/ takes a tenant_id
+//   auth [guard]   every server.sl calls `guard` (default require_tenant),
+//                  or says `// zokor:public`
 //
 // Test files (*_test.sl) may import what their tests need; every other
 // rule applies to them too except `tenant` and `auth`.
@@ -241,6 +248,9 @@ fn import_problem(from: Place, to: Place) -> str {
             if to.layer == "service" && from.layer == "service" {
                 return "";
             }
+            if to.layer == "store" && from.layer == "store" {
+                return "";
+            }
             if to.layer == "domain" && (from.layer == "service" || from.layer == "server") {
                 return "";
             }
@@ -441,7 +451,7 @@ fn check_tenant(r: Report, file: str, lines: [str]) {
     }
 }
 
-fn check_auth(r: Report, file: str, text: str) {
+fn check_auth(r: Report, file: str, text: str, guard_name: str) {
     let p = place_of(file);
     if p.kind != "feature" || p.layer != "server" || !strings.has_suffix(file, "/server.sl") {
         return;
@@ -449,11 +459,59 @@ fn check_auth(r: Report, file: str, text: str) {
     if strings.contains(text, "// zokor:public") {
         return;
     }
-    if !strings.contains(code_only_text(text), "require_tenant") {
-        add(r, file, 1, "auth", "routes not behind auth.require_tenant: add " +
-            "g.before(auth.require_tenant) in mount, or write // zokor:public if they are " +
+    if !strings.contains(code_only_text(text), guard_name) {
+        add(r, file, 1, "auth", "routes not behind auth." + guard_name + ": add " +
+            "g.before(auth." + guard_name + ") in mount, or write // zokor:public if they are " +
             "meant to be open");
     }
+}
+
+gc struct Rules {
+    tenant: bool,
+    auth: bool,
+    auth_guard: str,
+}
+
+fn load_rules(r: Report) -> Rules {
+    let rules = Rules { tenant: false, auth: false, auth_guard: "require_tenant" };
+    if !os.is_file("zokor.rules") {
+        return rules;
+    }
+    let rt = read_text("zokor.rules");
+    guard let text = rt else {
+        add(r, "zokor.rules", 0, "rules", "cannot read the file");
+        return rules;
+    }
+    let n = 0;
+    for l in strings.split(text, "\n") {
+        n = n + 1;
+        let line = l;
+        let hash = strings.find(line, "#");
+        if hash >= 0 {
+            line = strings.slice(line, 0, hash);
+        }
+        let words: [str] = [];
+        for w in strings.split(strings.replace(line, "\t", " "), " ") {
+            if len(w) > 0 {
+                push(words, w);
+            }
+        }
+        if len(words) == 0 {
+            continue;
+        }
+        if words[0] == "tenant" && len(words) == 1 {
+            rules.tenant = true;
+        } else if words[0] == "auth" && len(words) <= 2 {
+            rules.auth = true;
+            if len(words) == 2 {
+                rules.auth_guard = words[1];
+            }
+        } else {
+            add(r, "zokor.rules", n, "rules", "unknown rule '" + strings.trim(line) +
+                "': the optional rules are `tenant` and `auth [guard]`");
+        }
+    }
+    return rules;
 }
 
 fn code_only_text(text: str) -> str {
@@ -525,6 +583,7 @@ fn check_project(root_ok: bool) -> Report {
     let files: [str] = [];
     let dirs: [str] = [];
     let t = Tree { files: files, dirs: dirs };
+    let rules = load_rules(r);
     walk("src", t);
     r.packages = len(t.dirs);
     check_layout(r, t);
@@ -538,9 +597,11 @@ fn check_project(root_ok: bool) -> Report {
         check_imports(r, f, lines);
         check_sql(r, f, lines);
         check_config(r, f, lines);
-        if !is_test(f) {
+        if !is_test(f) && rules.tenant {
             check_tenant(r, f, lines);
-            check_auth(r, f, text);
+        }
+        if !is_test(f) && rules.auth {
+            check_auth(r, f, text, rules.auth_guard);
         }
     }
     return r;
