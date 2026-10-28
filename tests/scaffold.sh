@@ -157,11 +157,30 @@ violates pure src/orders/domain/order.sl 'import "fs";'
 violates pg src/orders/server/dto.sl 'import "pg";'
 violates config src/orders/service/service.sl 'fn port() -> str { return proc.getenv("PORT"); }'
 violates sql src/orders/store/memory.sl 'fn q(id: str) -> str { return "select * from orders where id = " + id; }'
+# A store may use another feature's store, so one transaction spans both.
+cp src/orders/store/store.sl "$WORK/saved"
+printf '%s\n' 'import "../../notes/store" as notes_store;' | cat - "$WORK/saved" >src/orders/store/store.sl
+"$ZOKOR" check >/dev/null || { "$ZOKOR" check; fail "zokor check refuses a store importing another feature's store"; }
+cp "$WORK/saved" src/orders/store/store.sl
+# tenant and auth are off until zokor.rules opts in.
+cp src/orders/service/service.sl "$WORK/saved_service"
+printf '%s\n' 'pub fn count() -> int { return 0; }' | cat - "$WORK/saved_service" >src/orders/service/service.sl
+cp src/orders/server/server.sl "$WORK/saved_server"
+grep -v require_tenant "$WORK/saved_server" >src/orders/server/server.sl
+"$ZOKOR" check >/dev/null || { "$ZOKOR" check; fail "zokor check enforces tenant or auth without zokor.rules"; }
+cp "$WORK/saved_service" src/orders/service/service.sl
+cp "$WORK/saved_server" src/orders/server/server.sl
+printf '# opted in\ntenant\nauth\n' >zokor.rules
 violates tenant src/orders/service/service.sl 'pub fn count() -> int { return 0; }'
 cp src/orders/server/server.sl "$WORK/saved"
 grep -v require_tenant "$WORK/saved" >src/orders/server/server.sl
 expect_refusal "src/orders/server/server.sl:1: auth:" "$ZOKOR" check
 cp "$WORK/saved" src/orders/server/server.sl
+printf 'auth require_session\n' >zokor.rules
+expect_refusal "auth.require_session" "$ZOKOR" check
+printf 'tenants\n' >zokor.rules
+expect_refusal "zokor.rules:1: rules: unknown rule 'tenants'" "$ZOKOR" check
+rm zokor.rules
 mkdir -p src/orders/server/extra && echo 'pub fn one() -> int { return 1; }' >src/orders/server/extra/extra.sl
 expect_refusal "src/orders/server/extra: tests:" "$ZOKOR" check
 rm -r src/orders/server/extra

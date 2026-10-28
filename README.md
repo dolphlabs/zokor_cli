@@ -50,6 +50,16 @@ zokor migrate [directory]   (default: migrations; DATABASE_URL required)
 A new project pins the zokor release this CLI was built against
 (`zokor version` prints it). `--zokor-tag` and `--zokor-git` pin another.
 
+`zokor check` always enforces layout, imports, pure, pg, sql, config and
+tests. Two rules are opt-in, one per line of a `zokor.rules` file at the
+service's root:
+
+```
+tenant                  # every public use case in service/ takes tenant_id
+auth require_session    # every server.sl calls this guard (default
+                        # require_tenant) or says // zokor:public
+```
+
 ## Watch Mode
 
 `zokor watch` (or `zokor start --watch`, or `make dev` in a generated project) runs your service under an active file watcher:
