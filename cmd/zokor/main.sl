@@ -7,6 +7,8 @@ import "time";
 fn usage() -> str {
     return "usage:\n" +
            "  zokor version               this CLI, and the zokor release new projects pin\n" +
+           "  zokor start [--watch]       build and start the service (or watch mode)\n" +
+           "  zokor watch                 alias for zokor start --watch\n" +
            "  zokor new <name> [--zokor-git URL] [--zokor-tag TAG]\n" +
            "  zokor newcomp <name> [--db memory|pg] [--zokor-git URL] [--zokor-tag TAG]\n" +
            "  zokor add feature <name> [--entity <singular>]\n" +
@@ -256,6 +258,10 @@ fn main() {
         add_cmd(args);
     } else if cmd == "check" {
         check_cmd(args);
+    } else if cmd == "start" {
+        start_cmd(args);
+    } else if cmd == "watch" {
+        watch_cmd(args);
     } else {
         fail_usage("unknown command '" + cmd + "'");
     }
