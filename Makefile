@@ -34,6 +34,7 @@ templates-check:
 # tests them. SCAFFOLD_TEST_DATABASE_URL and ZOKOR_TEST_DATABASE_URL turn
 # on the live Postgres parts.
 test: build
+	$(SLANGC) test cmd/zokor
 	sh tests/cli.sh
 	SLANGC="$(SLANGC)" sh tests/watch.sh
 	SLANGC="$(SLANGC)" sh tests/scaffold.sh
