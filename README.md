@@ -58,12 +58,14 @@ A new project pins the zokor release this CLI was built against
 - **Atomic staging**: Recompiles the service beside the running application (`.zokor/watch/app.next`) before swapping. If a compile error occurs (syntax error, type mismatch), the error is logged and the previous server continues running without interruption.
 - **Graceful restart**: Sends `SIGTERM` to the server's process group, allows graceful connection teardown, and force-kills if unresponsive before starting the new build.
 - **Crash policy**: If the application exits or crashes, the supervisor enters an idle state waiting for the next source edit rather than spinning in a restart loop.
+- **Fast builds**: Watch builds are slang development builds (`SLANG_DEV=1`): unoptimized C that compiles about ten times faster, so a large service rebuilds in seconds rather than minutes. The program runs slower; `zokor watch --release` builds optimized. Needs slang 0.2.5 or later; an older `slangc` ignores the setting and builds optimized.
+- **Saves during a build**: A save while a build is running cancels that build and starts a new one, so the server never runs code older than your last save.
 
 ## Development
 
 ```sh
 make build      # bin/zokor
-make test       # tests/cli.sh and tests/scaffold.sh
+make test       # the unit tests, tests/cli.sh, tests/watch.sh and tests/scaffold.sh
 make check      # those, plus templates-check
 ```
 
