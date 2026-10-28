@@ -26,13 +26,21 @@ fn locate_entry(specified: str) -> str {
     exit(2);
 }
 
+fn compiler_cmd() -> str {
+    let env_c = proc.getenv("SLANGC") ?? "";
+    if len(env_c) > 0 {
+        return env_c;
+    }
+    return "slangc";
+}
+
 fn execute_build_task(entry: str, staging_path: str, ch: chan[SupervisorEvent]) {
     let p = parent_of(staging_path);
     if len(p) > 0 {
         let _md = make_dirs(p);
     }
     let env: [str] = [];
-    let res = proc.spawn(["slangc", entry, "-o", staging_path], env, "", proc.SPAWN_GROUP | proc.SPAWN_NULL_STDIN);
+    let res = proc.spawn([compiler_cmd(), entry, "-o", staging_path], env, "", proc.SPAWN_GROUP | proc.SPAWN_NULL_STDIN);
     guard let bpid = res else let e = err_of(res) {
         io.eprintln("zokor: failed to spawn compiler: " + e);
         chan_send(ch, SupervisorEvent {
@@ -138,7 +146,7 @@ fn run_foreground(entry: str, bin_path: str, passthrough: [str]) {
     }
     log_info("[zokor] building " + entry + " -> " + bin_path + "...");
     let env: [str] = [];
-    let bres = proc.spawn(["slangc", entry, "-o", bin_path], env, "", proc.SPAWN_GROUP | proc.SPAWN_NULL_STDIN);
+    let bres = proc.spawn([compiler_cmd(), entry, "-o", bin_path], env, "", proc.SPAWN_GROUP | proc.SPAWN_NULL_STDIN);
     guard let bpid = bres else let e = err_of(bres) {
         io.eprintln("zokor: failed to spawn compiler: " + e);
         exit(1);

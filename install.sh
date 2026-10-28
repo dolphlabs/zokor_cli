@@ -12,7 +12,7 @@
 set -eu
 
 REPO=https://github.com/dolphlabs/zokor_cli
-MIN_SLANG=0.2.3
+MIN_SLANG=0.2.4
 
 die() { echo "zokor install: $*" >&2; exit 1; }
 
