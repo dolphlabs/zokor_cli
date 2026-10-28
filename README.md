@@ -8,7 +8,8 @@ migrations.
 ## Install
 
 You need [slang](https://github.com/dolphlabs/slang/releases) 0.2.4 or
-later, git and make.
+later, git and make. With slang 0.2.5 or later, `zokor watch` uses slang's
+development builds, which rebuild several times faster.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dolphlabs/zokor_cli/main/install.sh | sh
@@ -16,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/dolphlabs/zokor_cli/main/install.sh
 
 This builds the latest release with your `slangc` and installs it as
 `~/.local/bin/zokor`. Set `PREFIX` to put it somewhere else, or
-`ZOKOR_CLI_VERSION=v0.2.1` to pick a release. From a checkout,
+`ZOKOR_CLI_VERSION=v0.2.2` to pick a release. From a checkout,
 `make install` (or `make install PREFIX=~/.local`) does the same.
 
 ## Start a service
@@ -68,12 +69,14 @@ auth require_session    # every server.sl calls this guard (default
 - **Atomic staging**: Recompiles the service beside the running application (`.zokor/watch/app.next`) before swapping. If a compile error occurs (syntax error, type mismatch), the error is logged and the previous server continues running without interruption.
 - **Graceful restart**: Sends `SIGTERM` to the server's process group, allows graceful connection teardown, and force-kills if unresponsive before starting the new build.
 - **Crash policy**: If the application exits or crashes, the supervisor enters an idle state waiting for the next source edit rather than spinning in a restart loop.
+- **Fast builds**: Watch builds are slang development builds (`SLANG_DEV=1`): unoptimized C that compiles about ten times faster, so a large service rebuilds in seconds rather than minutes. The program runs slower; `zokor watch --release` builds optimized. Needs slang 0.2.5 or later; an older `slangc` ignores the setting and builds optimized.
+- **Saves during a build**: A save while a build is running cancels that build and starts a new one, so the server never runs code older than your last save.
 
 ## Development
 
 ```sh
 make build      # bin/zokor
-make test       # tests/cli.sh and tests/scaffold.sh
+make test       # the unit tests, tests/cli.sh, tests/watch.sh and tests/scaffold.sh
 make check      # those, plus templates-check
 ```
 

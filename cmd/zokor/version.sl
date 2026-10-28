@@ -4,5 +4,5 @@
 // kept equal to this repository's own pin in slang.project
 // (tests/cli.sh checks the two agree).
 fn cli_version() -> str {
-    return "0.2.1";
+    return "0.2.2";
 }

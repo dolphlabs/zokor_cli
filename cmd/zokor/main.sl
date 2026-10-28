@@ -8,7 +8,8 @@ fn usage() -> str {
     return "usage:\n" +
            "  zokor version               this CLI, and the zokor release new projects pin\n" +
            "  zokor start [--watch]       build and start the service (or watch mode)\n" +
-           "  zokor watch                 alias for zokor start --watch\n" +
+           "  zokor watch [--release]     alias for zokor start --watch; builds are\n" +
+           "                              unoptimized for speed unless --release\n" +
            "  zokor new <name> [--zokor-git URL] [--zokor-tag TAG]\n" +
            "  zokor newcomp <name> [--db memory|pg] [--zokor-git URL] [--zokor-tag TAG]\n" +
            "  zokor add feature <name> [--entity <singular>]\n" +

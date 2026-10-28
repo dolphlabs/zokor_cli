@@ -163,3 +163,102 @@ wait "$WATCH_PID" 2>/dev/null || true
 unset WATCH_PID
 
 echo "PASS watch clean shutdown"
+
+# 7. A save during a build cancels that build and builds again, and the
+# build it cancelled never runs: it was compiling sources already out of
+# date. Before, the stale build ran and the new save waited for another
+# one. The compiler reads the sources first and then takes 4 s more, as a
+# long build does, so the save lands after the old sources were read.
+cat <<EOF > "$WORK/slow-slangc"
+#!/bin/sh
+echo "SLANG_DEV=\${SLANG_DEV:-}" >> "$WORK/build-env.log"
+"$SLANGC" "\$@" || exit \$?
+sleep 4
+EOF
+chmod +x "$WORK/slow-slangc"
+cat <<'EOF' > src/main.sl
+import "io";
+import "time";
+
+println("WATCH_APP_V4_READY");
+io.flush();
+while true {
+    time.sleep(100000000);
+}
+EOF
+SLANGC="$WORK/slow-slangc" "$ZOKOR" watch > "$WORK/watch2.log" 2>&1 &
+WATCH_PID=$!
+sleep 1
+cat <<'EOF' > src/main.sl
+import "io";
+import "time";
+
+println("WATCH_APP_V5_READY");
+io.flush();
+while true {
+    time.sleep(100000000);
+}
+EOF
+
+WAIT=0
+while [ "$WAIT" -lt 300 ]; do
+    if grep -q "WATCH_APP_V5_READY" "$WORK/watch2.log" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    WAIT=$((WAIT + 1))
+done
+if ! grep -q "WATCH_APP_V5_READY" "$WORK/watch2.log" 2>/dev/null; then
+    cat "$WORK/watch2.log"
+    fail "a save during a build was not built"
+fi
+if grep -q "WATCH_APP_V4_READY" "$WORK/watch2.log" 2>/dev/null; then
+    cat "$WORK/watch2.log"
+    fail "the build cancelled by a save still ran"
+fi
+if ! grep -q "files changed during the build; restarting it" "$WORK/watch2.log" 2>/dev/null; then
+    cat "$WORK/watch2.log"
+    fail "the build in progress was not restarted"
+fi
+kill -TERM "$WATCH_PID"
+wait "$WATCH_PID" 2>/dev/null || true
+unset WATCH_PID
+echo "PASS watch cancels a build made stale by a save"
+
+# 8. Watch builds are slang development builds (SLANG_DEV=1, set in the
+# build's environment beside everything else it inherits, so PATH and HOME
+# still reach slangc and cc); --release builds optimized, even with
+# SLANG_DEV=1 in the shell.
+if grep -qv '^SLANG_DEV=1$' "$WORK/build-env.log"; then
+    cat "$WORK/build-env.log"
+    fail "a watch build was not a development build"
+fi
+cat <<EOF > "$WORK/record-slangc"
+#!/bin/sh
+echo "SLANG_DEV=\${SLANG_DEV:-}" >> "$WORK/release-env.log"
+exec "$SLANGC" "\$@"
+EOF
+chmod +x "$WORK/record-slangc"
+: > "$WORK/release-env.log"
+SLANGC="$WORK/record-slangc" SLANG_DEV=1 "$ZOKOR" watch --release > "$WORK/watch3.log" 2>&1 &
+WATCH_PID=$!
+WAIT=0
+while [ "$WAIT" -lt 300 ]; do
+    if grep -q "WATCH_APP_V5_READY" "$WORK/watch3.log" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    WAIT=$((WAIT + 1))
+done
+kill -TERM "$WATCH_PID"
+wait "$WATCH_PID" 2>/dev/null || true
+unset WATCH_PID
+if ! grep -q "WATCH_APP_V5_READY" "$WORK/watch3.log" 2>/dev/null; then
+    cat "$WORK/watch3.log"
+    fail "watch --release did not build and start"
+fi
+if [ "$(cat "$WORK/release-env.log")" != "SLANG_DEV=" ]; then
+    cat "$WORK/release-env.log"
+    fail "watch --release made a development build"
+fi
+echo "PASS watch builds for development, and optimized with --release"

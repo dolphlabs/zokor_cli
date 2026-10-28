@@ -34,12 +34,36 @@ fn compiler_cmd() -> str {
     return "slangc";
 }
 
-fn execute_build_task(entry: str, staging_path: str, ch: chan[SupervisorEvent]) {
+// The environment a watch build runs with: this process's own, with
+// SLANG_DEV=1 unless `release`, and without it if `release` (so a
+// SLANG_DEV=1 set in the shell cannot turn --release back into a
+// development build). slangc's development build compiles unoptimized C
+// about ten times faster (a 21k-line service: 16 s a rebuild against 73 s).
+// It goes through the environment, not a --dev flag: a slangc older than
+// the flag ignores the variable and builds optimized, where it would fail
+// on an unknown option. proc.spawn's list replaces the whole environment,
+// so it carries all of it.
+fn build_env(release: bool) -> [str] {
+    let env: [str] = [];
+    for kv in os.environ() {
+        if !strings_has_prefix(kv, "SLANG_DEV=") {
+            push(env, kv);
+        }
+    }
+    if !release {
+        push(env, "SLANG_DEV=1");
+    }
+    return env;
+}
+
+// Build number `build`: its process is reported as soon as it is spawned, so
+// the supervisor can kill it if files change under it, and every result
+// carries the number, so a cancelled build's result is recognised and dropped.
+fn execute_build_task(entry: str, staging_path: str, env: [str], build: int, ch: chan[SupervisorEvent]) {
     let p = parent_of(staging_path);
     if len(p) > 0 {
         let _md = make_dirs(p);
     }
-    let env: [str] = [];
     let res = proc.spawn([compiler_cmd(), entry, "-o", staging_path], env, "", proc.SPAWN_GROUP | proc.SPAWN_NULL_STDIN);
     guard let bpid = res else let e = err_of(res) {
         io.eprintln("zokor: failed to spawn compiler: " + e);
@@ -47,10 +71,20 @@ fn execute_build_task(entry: str, staging_path: str, ch: chan[SupervisorEvent]) 
             kind: SupervisorEventKind.BuildFailed,
             paths: [],
             exit_code: 1,
-            err_msg: e
+            err_msg: e,
+            build: build,
+            pid: 0
         });
         return;
     }
+    chan_send(ch, SupervisorEvent {
+        kind: SupervisorEventKind.BuildStarted,
+        paths: [],
+        exit_code: 0,
+        err_msg: "",
+        build: build,
+        pid: bpid
+    });
     let wr = proc.wait(bpid, until_never());
     let code = wr ?? 1;
     if code == 0 {
@@ -58,14 +92,18 @@ fn execute_build_task(entry: str, staging_path: str, ch: chan[SupervisorEvent]) 
             kind: SupervisorEventKind.BuildSucceeded,
             paths: [],
             exit_code: 0,
-            err_msg: ""
+            err_msg: "",
+            build: build,
+            pid: 0
         });
     } else {
         chan_send(ch, SupervisorEvent {
             kind: SupervisorEventKind.BuildFailed,
             paths: [],
             exit_code: code,
-            err_msg: "compiler exited with code " + to_str(code)
+            err_msg: "compiler exited with code " + to_str(code),
+            build: build,
+            pid: 0
         });
     }
 }
@@ -77,7 +115,9 @@ fn child_wait_task(pid: int, ch: chan[SupervisorEvent]) {
         kind: SupervisorEventKind.ChildProcessExited,
         paths: [],
         exit_code: code,
-        err_msg: ""
+        err_msg: "",
+        build: 0,
+        pid: 0
     });
 }
 
@@ -87,7 +127,9 @@ fn debounce_timer_task(ms: int, ch: chan[SupervisorEvent]) {
         kind: SupervisorEventKind.DebounceTimerFired,
         paths: [],
         exit_code: 0,
-        err_msg: ""
+        err_msg: "",
+        build: 0,
+        pid: 0
     });
 }
 
@@ -109,7 +151,9 @@ fn watcher_task(handle: int, ch: chan[SupervisorEvent]) {
             kind: SupervisorEventKind.FilesChanged,
             paths: paths,
             exit_code: 0,
-            err_msg: ""
+            err_msg: "",
+            build: 0,
+            pid: 0
         });
     }
 }
@@ -122,7 +166,9 @@ fn shutdown_checker_task(ch: chan[SupervisorEvent]) {
         kind: SupervisorEventKind.ShutdownRequested,
         paths: [],
         exit_code: 0,
-        err_msg: ""
+        err_msg: "",
+        build: 0,
+        pid: 0
     });
 }
 
@@ -172,10 +218,16 @@ fn run_foreground(entry: str, bin_path: str, passthrough: [str]) {
     exit(scode);
 }
 
-fn run_watch(entry: str, bin_path: str, staging_path: str, debounce_ms: int, passthrough: [str], verbose: bool) {
+fn run_watch(entry: str, bin_path: str, staging_path: str, debounce_ms: int, passthrough: [str], verbose: bool, release: bool) {
     log_info("[zokor] starting in watch mode...");
     log_info("[zokor] watching directory: .");
     log_info("[zokor] entry point: " + entry);
+    if release {
+        log_info("[zokor] optimized builds (--release)");
+    } else {
+        log_info("[zokor] development builds: unoptimized, quick to compile (--release for optimized)");
+    }
+    let benv = build_env(release);
 
     if !os.is_dir(".zokor") {
         let _m1 = fs.mkdir(".zokor");
@@ -199,8 +251,8 @@ fn run_watch(entry: str, bin_path: str, staging_path: str, debounce_ms: int, pas
 
     // Initial build
     log_info("[zokor] initial build...");
-    sup.state = SupervisorState.Building;
-    spawn execute_build_task(entry, staging_path, ev_ch);
+    let first = trigger_build(sup, "");
+    spawn execute_build_task(entry, staging_path, benv, first.build, ev_ch);
 
     while true {
         select {
@@ -216,7 +268,19 @@ fn run_watch(entry: str, bin_path: str, staging_path: str, debounce_ms: int, pas
                 if act.kind == ActionKind.StartDebounceTimer {
                     spawn debounce_timer_task(debounce_ms, ev_ch);
                 } else if act.kind == ActionKind.TriggerBuild {
-                    spawn execute_build_task(entry, staging_path, ev_ch);
+                    spawn execute_build_task(entry, staging_path, benv, act.build, ev_ch);
+                } else if act.kind == ActionKind.CancelBuild {
+                    // SIGKILL, not a graceful stop: its output is discarded,
+                    // and it must be gone before the next build writes the
+                    // same staging files.
+                    if act.target_pid > 0 {
+                        let _kb = proc.kill(-act.target_pid, 9);
+                    }
+                    spawn debounce_timer_task(debounce_ms, ev_ch);
+                } else if act.kind == ActionKind.KillStaleBuild {
+                    if act.target_pid > 0 {
+                        let _ks = proc.kill(-act.target_pid, 9);
+                    }
                 } else if act.kind == ActionKind.StopChild {
                     stop_child_safely(act.target_pid);
                 } else if act.kind == ActionKind.StartChild {
@@ -233,13 +297,21 @@ fn run_watch(entry: str, bin_path: str, staging_path: str, debounce_ms: int, pas
                     let sres = proc.spawn(cmd, env, "", proc.SPAWN_GROUP);
                     guard let child_pid = sres else let e = err_of(sres) {
                         io.eprintln("zokor: failed to spawn server: " + e);
-                        sup.state = SupervisorState.Idle;
+                        let failed = supervisor_child_failed(sup);
+                        if failed.kind == ActionKind.StartDebounceTimer {
+                            spawn debounce_timer_task(debounce_ms, ev_ch);
+                        }
                         continue;
                     }
-                    sup.running_pid = child_pid;
-                    sup.state = SupervisorState.Idle;
                     log_info("[zokor] server started (pid " + to_str(child_pid) + ")");
                     spawn child_wait_task(child_pid, ev_ch);
+                    let next = supervisor_child_started(sup, child_pid);
+                    if len(next.log_msg) > 0 {
+                        log_info(next.log_msg);
+                    }
+                    if next.kind == ActionKind.StartDebounceTimer {
+                        spawn debounce_timer_task(debounce_ms, ev_ch);
+                    }
                 } else if act.kind == ActionKind.CleanAndExit {
                     if act.target_pid > 0 {
                         let _k = proc.kill(-act.target_pid, 15);
@@ -261,6 +333,7 @@ fn start_cmd(args: [str]) {
     let bin_arg = "";
     let debounce_ms = 50;
     let verbose = false;
+    let release = false;
     let passthrough: [str] = [];
 
     let i = 2;
@@ -278,6 +351,9 @@ fn start_cmd(args: [str]) {
             i = i + 1;
         } else if a == "--verbose" || a == "-v" {
             verbose = true;
+            i = i + 1;
+        } else if a == "--release" {
+            release = true;
             i = i + 1;
         } else if a == "--entry" {
             if i + 1 >= len(args) { fail_usage("--entry needs a path"); }
@@ -308,7 +384,7 @@ fn start_cmd(args: [str]) {
     let staging_path = ".zokor/watch/app.next";
 
     if watch_mode {
-        run_watch(entry, bin_path, staging_path, debounce_ms, passthrough, verbose);
+        run_watch(entry, bin_path, staging_path, debounce_ms, passthrough, verbose, release);
     } else {
         run_foreground(entry, bin_path, passthrough);
     }
