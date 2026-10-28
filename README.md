@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/dolphlabs/zokor_cli/main/install.sh
 
 This builds the latest release with your `slangc` and installs it as
 `~/.local/bin/zokor`. Set `PREFIX` to put it somewhere else, or
-`ZOKOR_CLI_VERSION=v0.2.0` to pick a release. From a checkout,
+`ZOKOR_CLI_VERSION=v0.2.1` to pick a release. From a checkout,
 `make install` (or `make install PREFIX=~/.local`) does the same.
 
 ## Start a service
