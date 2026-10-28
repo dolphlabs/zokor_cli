@@ -34,7 +34,7 @@ templates-check:
 # on the live Postgres parts.
 test: build
 	sh tests/cli.sh
-	sh tests/watch.sh
+	SLANGC="$(SLANGC)" sh tests/watch.sh
 	SLANGC="$(SLANGC)" sh tests/scaffold.sh
 
 check: templates-check test

@@ -7,7 +7,7 @@ migrations.
 
 ## Install
 
-You need [slang](https://github.com/dolphlabs/slang/releases) 0.2.3 or
+You need [slang](https://github.com/dolphlabs/slang/releases) 0.2.4 or
 later, git and make.
 
 ```sh
