@@ -8,7 +8,8 @@ migrations.
 ## Install
 
 You need [slang](https://github.com/dolphlabs/slang/releases) 0.2.4 or
-later, git and make.
+later, git and make. With slang 0.2.5 or later, `zokor watch` uses slang's
+development builds, which rebuild several times faster.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dolphlabs/zokor_cli/main/install.sh | sh
@@ -16,7 +17,7 @@ curl -fsSL https://raw.githubusercontent.com/dolphlabs/zokor_cli/main/install.sh
 
 This builds the latest release with your `slangc` and installs it as
 `~/.local/bin/zokor`. Set `PREFIX` to put it somewhere else, or
-`ZOKOR_CLI_VERSION=v0.2.1` to pick a release. From a checkout,
+`ZOKOR_CLI_VERSION=v0.2.2` to pick a release. From a checkout,
 `make install` (or `make install PREFIX=~/.local`) does the same.
 
 ## Start a service

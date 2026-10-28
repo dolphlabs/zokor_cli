@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/dolphlabs/zokor_cli/main/install.sh | sh
 #
-# ZOKOR_CLI_VERSION picks a release (e.g. v0.2.1; default: the latest).
+# ZOKOR_CLI_VERSION picks a release (e.g. v0.2.2; default: the latest).
 # PREFIX is where it goes (default: $HOME/.local, so $HOME/.local/bin/zokor).
 # ZOKOR_CLI_SOURCE builds a local checkout instead (what CI tests).
 #
