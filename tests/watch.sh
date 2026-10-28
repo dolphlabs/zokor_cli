@@ -163,3 +163,63 @@ wait "$WATCH_PID" 2>/dev/null || true
 unset WATCH_PID
 
 echo "PASS watch clean shutdown"
+
+# 7. A save during a build cancels that build and builds again, and the
+# build it cancelled never runs: it was compiling sources already out of
+# date. Before, the stale build ran and the new save waited for another
+# one. The compiler reads the sources first and then takes 4 s more, as a
+# long build does, so the save lands after the old sources were read.
+cat <<EOF > "$WORK/slow-slangc"
+#!/bin/sh
+"$SLANGC" "\$@" || exit \$?
+sleep 4
+EOF
+chmod +x "$WORK/slow-slangc"
+cat <<'EOF' > src/main.sl
+import "io";
+import "time";
+
+println("WATCH_APP_V4_READY");
+io.flush();
+while true {
+    time.sleep(100000000);
+}
+EOF
+SLANGC="$WORK/slow-slangc" "$ZOKOR" watch > "$WORK/watch2.log" 2>&1 &
+WATCH_PID=$!
+sleep 1
+cat <<'EOF' > src/main.sl
+import "io";
+import "time";
+
+println("WATCH_APP_V5_READY");
+io.flush();
+while true {
+    time.sleep(100000000);
+}
+EOF
+
+WAIT=0
+while [ "$WAIT" -lt 300 ]; do
+    if grep -q "WATCH_APP_V5_READY" "$WORK/watch2.log" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+    WAIT=$((WAIT + 1))
+done
+if ! grep -q "WATCH_APP_V5_READY" "$WORK/watch2.log" 2>/dev/null; then
+    cat "$WORK/watch2.log"
+    fail "a save during a build was not built"
+fi
+if grep -q "WATCH_APP_V4_READY" "$WORK/watch2.log" 2>/dev/null; then
+    cat "$WORK/watch2.log"
+    fail "the build cancelled by a save still ran"
+fi
+if ! grep -q "files changed during the build; restarting it" "$WORK/watch2.log" 2>/dev/null; then
+    cat "$WORK/watch2.log"
+    fail "the build in progress was not restarted"
+fi
+kill -TERM "$WATCH_PID"
+wait "$WATCH_PID" 2>/dev/null || true
+unset WATCH_PID
+echo "PASS watch cancels a build made stale by a save"
