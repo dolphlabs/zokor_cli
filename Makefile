@@ -14,6 +14,7 @@ build:
 # which is where a generated project's `make check` looks for it.
 install: build
 	install -d "$(DESTDIR)$(BINDIR)"
+	rm -f "$(DESTDIR)$(BINDIR)/zokor"
 	install -m 755 bin/zokor "$(DESTDIR)$(BINDIR)/zokor"
 
 uninstall:
@@ -34,7 +35,7 @@ templates-check:
 # on the live Postgres parts.
 test: build
 	sh tests/cli.sh
-	sh tests/watch.sh
+	SLANGC="$(SLANGC)" sh tests/watch.sh
 	SLANGC="$(SLANGC)" sh tests/scaffold.sh
 
 check: templates-check test
