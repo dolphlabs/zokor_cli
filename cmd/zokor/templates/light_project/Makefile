@@ -1,7 +1,7 @@
 SLANGC ?= slangc
 ZOKOR ?= zokor
 
-.PHONY: test build run check
+.PHONY: test build run dev check
 
 test:
 	@set -e; for d in $$(find src -name '*_test.sl' | xargs -n1 dirname | sort -u); do \
@@ -14,6 +14,9 @@ build:
 
 run: build
 	./bin/__service__
+
+dev:
+	$(ZOKOR) watch
 
 check:
 	$(ZOKOR) check

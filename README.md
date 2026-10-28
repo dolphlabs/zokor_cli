@@ -25,7 +25,8 @@ This builds the latest release with your `slangc` and installs it as
 zokor new billing
 cd billing
 slangc get
-make run        # serves on :8080; GET /healthz
+make dev        # or `zokor watch`: watches src/, rebuilds & reloads on edit
+# or `make run` / `zokor start` for a single foreground run
 ```
 
 `zokor new` writes a small service: startup, config and a health check.
@@ -36,6 +37,8 @@ domain, service, store and server, auth, and `--db pg` for Postgres.
 
 ```
 zokor version               this CLI, and the zokor release new projects pin
+zokor start [--watch]       build and start the service (or watch mode)
+zokor watch                 alias for zokor start --watch
 zokor new <name> [--zokor-git URL] [--zokor-tag TAG]
 zokor newcomp <name> [--db memory|pg] [--zokor-git URL] [--zokor-tag TAG]
 zokor add feature <name> [--entity <singular>]
@@ -46,6 +49,15 @@ zokor migrate [directory]   (default: migrations; DATABASE_URL required)
 
 A new project pins the zokor release this CLI was built against
 (`zokor version` prints it). `--zokor-tag` and `--zokor-git` pin another.
+
+## Watch Mode
+
+`zokor watch` (or `zokor start --watch`, or `make dev` in a generated project) runs your service under an active file watcher:
+
+- **Kernel events**: Uses native OS kernel notifications (`FSEvents` on macOS, `inotify` on Linux) with zero CPU polling overhead.
+- **Atomic staging**: Recompiles the service beside the running application (`.zokor/watch/app.next`) before swapping. If a compile error occurs (syntax error, type mismatch), the error is logged and the previous server continues running without interruption.
+- **Graceful restart**: Sends `SIGTERM` to the server's process group, allows graceful connection teardown, and force-kills if unresponsive before starting the new build.
+- **Crash policy**: If the application exits or crashes, the supervisor enters an idle state waiting for the next source edit rather than spinning in a restart loop.
 
 ## Development
 
