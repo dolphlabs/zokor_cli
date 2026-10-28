@@ -37,10 +37,20 @@ fi
 [ -n "$tag" ] || die "no release of zokor_cli found at $REPO"
 
 PREFIX=${PREFIX:-$HOME/.local}
+target="$PREFIX/bin/zokor"
+old_version=""
+if [ -x "$target" ]; then
+    old_version=$("$target" version 2>/dev/null || true)
+fi
+
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 
-echo "zokor install: building zokor_cli $tag with slangc $have"
+if [ -n "$old_version" ]; then
+    echo "zokor install: updating $target ($old_version -> $tag) with slangc $have"
+else
+    echo "zokor install: building zokor_cli $tag with slangc $have"
+fi
 if [ -n "${ZOKOR_CLI_SOURCE:-}" ]; then
     cp -R "$ZOKOR_CLI_SOURCE" "$work/zokor_cli"
     rm -rf "$work/zokor_cli/bin"
@@ -51,7 +61,12 @@ fi
 make -s -C "$work/zokor_cli" install PREFIX="$PREFIX" >"$work/build.log" 2>&1 ||
     { cat "$work/build.log" >&2; die "build failed (log above)"; }
 
-echo "zokor install: installed $PREFIX/bin/zokor ($("$PREFIX/bin/zokor" version))"
+new_version=$("$target" version 2>/dev/null || echo "$tag")
+if [ -n "$old_version" ]; then
+    echo "zokor install: updated $target ($old_version -> $new_version)"
+else
+    echo "zokor install: installed $target ($new_version)"
+fi
 case ":$PATH:" in
     *":$PREFIX/bin:"*) ;;
     *) echo "zokor install: add $PREFIX/bin to your PATH, e.g. export PATH=\"$PREFIX/bin:\$PATH\"" ;;
