@@ -14,6 +14,7 @@ build:
 # which is where a generated project's `make check` looks for it.
 install: build
 	install -d "$(DESTDIR)$(BINDIR)"
+	rm -f "$(DESTDIR)$(BINDIR)/zokor"
 	install -m 755 bin/zokor "$(DESTDIR)$(BINDIR)/zokor"
 
 uninstall:
