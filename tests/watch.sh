@@ -5,6 +5,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ZOKOR="$ROOT/bin/zokor"
 WORK="$(mktemp -d)"
 
+export SLANGC="${SLANGC:-slangc}"
+case "$SLANGC" in
+    */*)
+        SLANGC_DIR="$(cd "$(dirname "$SLANGC")" && pwd)"
+        PATH="$SLANGC_DIR:$PATH"
+        export PATH
+        ;;
+esac
+
 cleanup() {
     if [ -n "${WATCH_PID:-}" ]; then
         kill -TERM "$WATCH_PID" 2>/dev/null || true
