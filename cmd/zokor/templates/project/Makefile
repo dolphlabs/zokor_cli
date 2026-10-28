@@ -1,7 +1,7 @@
 SLANGC ?= slangc
 ZOKOR ?= zokor
 
-.PHONY: test build run check
+.PHONY: test build run dev check
 
 # Every package with tests, found rather than listed, so a new one is
 # never left out.
@@ -16,6 +16,9 @@ build:
 
 run: build
 	./bin/__service__
+
+dev:
+	$(ZOKOR) watch
 
 # The layering, tenant, SQL and config rules in AGENTS.md, then tests.
 check:
