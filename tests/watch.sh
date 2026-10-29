@@ -25,6 +25,31 @@ trap cleanup EXIT INT TERM
 
 fail() { echo "FAIL watch: $*" >&2; exit 1; }
 
+# The server a watch log last started, from "[zokor] server started (pid N)".
+last_server_pid() {
+    sed -n 's/.*server started (pid \([0-9][0-9]*\)).*/\1/p' "$1" | tail -1
+}
+
+# Stopping the watcher must stop its server. The server runs in its own
+# process group, so the signal that stops the watcher never reaches it;
+# the watcher has to. It once took the wait that its own shutdown woke
+# for the server crashing, forgot the server, and left it running, still
+# writing to the terminal -- 31 of them were found on one machine.
+server_stopped() {
+    _pid=$(last_server_pid "$1")
+    [ -n "$_pid" ] || fail "no server pid in $1"
+    _w=0
+    while kill -0 "$_pid" 2>/dev/null && [ "$_w" -lt 30 ]; do
+        sleep 0.1
+        _w=$((_w + 1))
+    done
+    if kill -0 "$_pid" 2>/dev/null; then
+        kill -KILL -"$_pid" 2>/dev/null || kill -KILL "$_pid" 2>/dev/null
+        cat "$1"
+        fail "$2: the server (pid $_pid) outlived the watcher"
+    fi
+}
+
 # Create a test project with slang.project and src/main.sl
 cd "$WORK"
 cat <<'EOF' > slang.project
@@ -157,12 +182,13 @@ if ! grep -q "WATCH_APP_V3_READY" "$WORK/watch.log" 2>/dev/null; then
 fi
 echo "PASS watch recovery after syntax fix"
 
-# 6. Graceful shutdown on SIGTERM / SIGINT
+# 6. Graceful shutdown on SIGTERM, the server with it
 kill -TERM "$WATCH_PID"
 wait "$WATCH_PID" 2>/dev/null || true
 unset WATCH_PID
+server_stopped "$WORK/watch.log" "SIGTERM"
 
-echo "PASS watch clean shutdown"
+echo "PASS watch clean shutdown, server stopped"
 
 # 7. A save during a build cancels that build and builds again, and the
 # build it cancelled never runs: it was compiling sources already out of
@@ -250,9 +276,13 @@ while [ "$WAIT" -lt 300 ]; do
     sleep 0.1
     WAIT=$((WAIT + 1))
 done
+# SIGTERM: a non-interactive shell starts background jobs with SIGINT
+# ignored, so the Ctrl-C path is only reachable from a terminal. Both
+# signals take the watcher through the same shutdown.
 kill -TERM "$WATCH_PID"
 wait "$WATCH_PID" 2>/dev/null || true
 unset WATCH_PID
+server_stopped "$WORK/watch3.log" "SIGTERM after a rebuild"
 if ! grep -q "WATCH_APP_V5_READY" "$WORK/watch3.log" 2>/dev/null; then
     cat "$WORK/watch3.log"
     fail "watch --release did not build and start"
