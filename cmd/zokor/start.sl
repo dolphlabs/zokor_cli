@@ -108,16 +108,41 @@ fn execute_build_task(entry: str, staging_path: str, env: [str], build: int, ch:
     }
 }
 
+// Reports server `pid`'s exit, once it has exited. proc.wait can return
+// an error while the server is still running -- slang 0.2.5's comes back
+// with "wait failed" when the watcher's own Ctrl-C wakes it -- and that was
+// taken for a crash with exit code 1: the watcher forgot the server, and
+// shutting down then left it running, in its own process group where the
+// Ctrl-C never reached it, still writing to the terminal. An error is an
+// exit only when the process is gone; during shutdown this reports
+// nothing, since the shutdown path stops the server itself.
 fn child_wait_task(pid: int, ch: chan[SupervisorEvent]) {
-    let wr = proc.wait(pid, until_never());
-    let code = wr ?? 1;
+    while true {
+        let wr = proc.wait(pid, until_never());
+        guard let code = wr else let e = err_of(wr) {
+            if proc.shutdown_requested() {
+                return;
+            }
+            if e == "proc.wait: no such child process" {
+                send_exit(ch, pid, 1);
+                return;
+            }
+            time.sleep(100000000); // woken while it still runs: wait again
+            continue;
+        }
+        send_exit(ch, pid, code);
+        return;
+    }
+}
+
+fn send_exit(ch: chan[SupervisorEvent], pid: int, code: int) {
     chan_send(ch, SupervisorEvent {
         kind: SupervisorEventKind.ChildProcessExited,
         paths: [],
         exit_code: code,
         err_msg: "",
         build: 0,
-        pid: 0
+        pid: pid
     });
 }
 
@@ -313,6 +338,11 @@ fn run_watch(entry: str, bin_path: str, staging_path: str, debounce_ms: int, pas
                         spawn debounce_timer_task(debounce_ms, ev_ch);
                     }
                 } else if act.kind == ActionKind.CleanAndExit {
+                    // A build in progress too: slangc and the cc under it
+                    // are in their own group, and outlived the watcher.
+                    if sup.build_pid > 0 {
+                        let _kb = proc.kill(-sup.build_pid, 9);
+                    }
                     if act.target_pid > 0 {
                         let _k = proc.kill(-act.target_pid, 15);
                         let _w = proc.wait(act.target_pid, until_of(time.mono() + 1000000000));
