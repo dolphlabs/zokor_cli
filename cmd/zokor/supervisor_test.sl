@@ -79,14 +79,7 @@ fn test_supervisor_lifecycle_normal() {
     assert(a6.target_pid == 100);
 
     // Previous child exits -> starts next server
-    let a7 = supervisor_step(s, SupervisorEvent {
-        kind: SupervisorEventKind.ChildProcessExited,
-        paths: [],
-        exit_code: 0,
-        err_msg: "",
-        build: s.build_seq,
-        pid: 0
-    });
+    let a7 = supervisor_step(s, ev_exit(100, 0));
     assert(s.state == SupervisorState.StartingNext);
     assert(a7.kind == ActionKind.StartChild);
 }
@@ -114,14 +107,7 @@ fn test_supervisor_child_crash_no_hot_restart() {
     s.running_pid = 300;
     s.state = SupervisorState.Idle;
 
-    let a = supervisor_step(s, SupervisorEvent {
-        kind: SupervisorEventKind.ChildProcessExited,
-        paths: [],
-        exit_code: 1,
-        err_msg: "",
-        build: s.build_seq,
-        pid: 0
-    });
+    let a = supervisor_step(s, ev_exit(300, 1));
     assert(s.state == SupervisorState.Idle);
     assert(a.kind == ActionKind.None);
     assert(s.running_pid == 0); // does not auto-restart in hot loop!
@@ -147,6 +133,12 @@ fn test_supervisor_shutdown() {
 // tests do not look at are zero.
 fn ev(kind: SupervisorEventKind, paths: [str]) -> SupervisorEvent {
     return SupervisorEvent { kind: kind, paths: paths, exit_code: 0, err_msg: "", build: 0, pid: 0 };
+}
+
+// Process `pid` exited with `code`.
+fn ev_exit(pid: int, code: int) -> SupervisorEvent {
+    let nopaths: [str] = [];
+    return SupervisorEvent { kind: SupervisorEventKind.ChildProcessExited, paths: nopaths, exit_code: code, err_msg: "", build: 0, pid: pid };
 }
 
 // A result of build number `build`.
@@ -182,10 +174,33 @@ fn test_supervisor_change_while_restarting_is_built_next() {
     assert(s.state == SupervisorState.StoppingPrevious);
 
     supervisor_step(s, ev(SupervisorEventKind.FilesChanged, ["src/b.sl"]));
-    let start = supervisor_step(s, ev(SupervisorEventKind.ChildProcessExited, nopaths));
+    let start = supervisor_step(s, ev_exit(100, 0));
     assert(start.kind == ActionKind.StartChild);
     let next = supervisor_child_started(s, 101);
     assert(s.running_pid == 101);
     assert(next.kind == ActionKind.StartDebounceTimer, "src/b.sl was never rebuilt");
     assert(s.state == SupervisorState.Debouncing);
+}
+
+// The server stopped for a rebuild reports its exit late, after its
+// successor is up. That exit must not make the watcher forget the new
+// server: shutdown would then leave it running, orphaned.
+fn test_supervisor_ignores_the_previous_servers_late_exit() {
+    let s = make_supervisor("src/main.sl", ".zokor/watch/app", ".zokor/watch/app.next", false);
+    let _st = supervisor_child_started(s, 101);
+    let a = supervisor_step(s, ev_exit(100, 143));
+    assert(a.kind == ActionKind.None);
+    assert(s.running_pid == 101, "forgot the running server");
+    let down = supervisor_step(s, ev(SupervisorEventKind.ShutdownRequested, ["x"]));
+    assert(down.kind == ActionKind.CleanAndExit);
+    assert(down.target_pid == 101, "shutdown would leave the server running");
+}
+
+// Only the running server's own exit is a crash.
+fn test_supervisor_reports_the_running_servers_crash() {
+    let s = make_supervisor("src/main.sl", ".zokor/watch/app", ".zokor/watch/app.next", false);
+    let _st = supervisor_child_started(s, 7);
+    let a = supervisor_step(s, ev_exit(7, 2));
+    assert(s.running_pid == 0);
+    assert(a.log_msg == "[zokor] application crashed (exit code 2). Waiting for file changes...");
 }
