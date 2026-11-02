@@ -123,6 +123,16 @@ fn supervisor_step(s: Supervisor, ev: SupervisorEvent) -> SupervisorAction {
         return action(ActionKind.CleanAndExit, pid, "[zokor] shutting down watcher...");
     }
 
+    // An exit is news only about the server running now. The previous
+    // one's exit arrives after it was stopped for a rebuild, sometimes
+    // after its successor started; taken as the current server's, it made
+    // the watcher forget that server, and shutdown then left it running
+    // -- an orphan in its own process group, still writing to the
+    // terminal.
+    if ev.kind == SupervisorEventKind.ChildProcessExited && ev.pid != s.running_pid {
+        return no_action();
+    }
+
     // A build that was cancelled before it reported its process: stop it now.
     if ev.kind == SupervisorEventKind.BuildStarted {
         if ev.build == s.build_seq && s.state == SupervisorState.Building {
