@@ -7,12 +7,12 @@
 # PREFIX is where it goes (default: $HOME/.local, so $HOME/.local/bin/zokor).
 # ZOKOR_CLI_SOURCE builds a local checkout instead (what CI tests).
 #
-# Needs slang 0.2.3 or later (https://github.com/dolphlabs/slang/releases),
+# Needs slang 0.3.0 or later (https://github.com/dolphlabs/slang/releases),
 # git and make: the projects zokor writes are built with slangc anyway.
 set -eu
 
 REPO=https://github.com/dolphlabs/zokor_cli
-MIN_SLANG=0.2.4
+MIN_SLANG=0.3.0
 
 die() { echo "zokor install: $*" >&2; exit 1; }
 
